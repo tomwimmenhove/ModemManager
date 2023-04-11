@@ -50,6 +50,7 @@ static gboolean status_flag;
 static gboolean list_flag;
 static gchar *create_str;
 static gchar *create_with_data_str;
+static gchar *create_with_text_str;
 static gchar *delete_str;
 
 static GOptionEntry entries[] = {
@@ -67,6 +68,10 @@ static GOptionEntry entries[] = {
     },
     { "messaging-create-sms-with-data", 0, 0, G_OPTION_ARG_FILENAME, &create_with_data_str,
       "Pass the given file as data contents when creating a new SMS",
+      "[File path]"
+    },
+    { "messaging-create-sms-with-text", 0, 0, G_OPTION_ARG_FILENAME, &create_with_text_str,
+      "Pass the given file as message contents when creating a new SMS",
       "[File path]"
     },
     { "messaging-delete-sms", 0, 0, G_OPTION_ARG_STRING, &delete_str,
@@ -112,6 +117,12 @@ mmcli_modem_messaging_options_enabled (void)
 
     if (create_with_data_str && !create_str) {
         g_printerr ("error: `--messaging-create-with-data' must be given along "
+                    "with `--messaging-create-sms'\n");
+        exit (EXIT_FAILURE);
+    }
+
+    if (create_with_text_str && !create_str) {
+        g_printerr ("error: `--messaging-create-with-text' must be given along "
                     "with `--messaging-create-sms'\n");
         exit (EXIT_FAILURE);
     }
@@ -164,9 +175,32 @@ mmcli_modem_messaging_shutdown (void)
     context_free ();
 }
 
+static void get_file_contents(const gchar *filename, gchar **contents, gsize *contents_size)
+{
+    GError *error = NULL;
+    gchar *path;
+    GFile *file;
+
+    g_debug ("Reading data from file '%s'", filename);
+
+    file = g_file_new_for_commandline_arg (filename);
+    path = g_file_get_path (file);
+    if (!g_file_get_contents (path,
+                  contents,
+                  contents_size,
+                  &error)) {
+        g_printerr ("error: cannot read from file '%s': '%s'\n",
+            filename, error->message);
+        exit (EXIT_FAILURE);
+    }
+    g_free (path);
+    g_object_unref (file);
+}
+
 static MMSmsProperties *
 build_sms_properties_from_input (const gchar *properties_string,
-                                 const gchar *data_file)
+                                 const gchar *data_file,
+                                 const gchar *text_file)
 {
     GError *error = NULL;
     MMSmsProperties *properties;
@@ -178,27 +212,22 @@ build_sms_properties_from_input (const gchar *properties_string,
     }
 
     if (data_file) {
-        gchar *path;
-        GFile *file;
         gchar *contents;
         gsize contents_size;
 
-        g_debug ("Reading data from file '%s'", data_file);
-
-        file = g_file_new_for_commandline_arg (data_file);
-        path = g_file_get_path (file);
-        if (!g_file_get_contents (path,
-                                  &contents,
-                                  &contents_size,
-                                  &error)) {
-            g_printerr ("error: cannot read from file '%s': '%s'\n",
-                        data_file, error->message);
-            exit (EXIT_FAILURE);
-        }
-        g_free (path);
-        g_object_unref (file);
-
+        get_file_contents(data_file, &contents, &contents_size);
         mm_sms_properties_set_data (properties, (guint8 *)contents, contents_size);
+        g_free (contents);
+    }
+
+    if (text_file) {
+        gchar *contents;
+        gsize contents_size;
+
+        get_file_contents(text_file, &contents, &contents_size);
+
+        mm_sms_properties_set_text(properties, contents);
+
         g_free (contents);
     }
 
@@ -378,7 +407,8 @@ get_modem_ready (GObject      *source,
         MMSmsProperties *properties;
 
         properties = build_sms_properties_from_input (create_str,
-                                                      create_with_data_str);
+                                                      create_with_data_str,
+                                                      create_with_text_str);
         g_debug ("Asynchronously creating new SMS in modem...");
         mm_modem_messaging_create (ctx->modem_messaging,
                                    properties,
@@ -461,7 +491,8 @@ mmcli_modem_messaging_run_synchronous (GDBusConnection *connection)
         MMSmsProperties *properties;
 
         properties = build_sms_properties_from_input (create_str,
-                                                      create_with_data_str);
+                                                      create_with_data_str,
+                                                      create_with_text_str);
         g_debug ("Synchronously creating new SMS in modem...");
         sms = mm_modem_messaging_create_sync (ctx->modem_messaging,
                                               properties,
