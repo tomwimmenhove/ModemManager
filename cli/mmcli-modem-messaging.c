@@ -225,9 +225,7 @@ build_sms_properties_from_input (const gchar *properties_string,
         gsize contents_size;
 
         get_file_contents(text_file, &contents, &contents_size);
-
         mm_sms_properties_set_text(properties, contents);
-
         g_free (contents);
     }
 
